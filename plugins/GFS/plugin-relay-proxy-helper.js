@@ -1,5 +1,5 @@
 /**
- * 修改自 https://raw.githubusercontent.com/GUI-for-Cores/Plugin-Hub/main/plugins/GFS/plugin-relay-proxy-helper.js
+ * 修改自 https://github.com/GUI-for-Cores/Plugin-Hub/blob/main/plugins/GFS/plugin-relay-proxy-helper.js
  * 新增记忆功能
  */
 
