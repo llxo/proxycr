@@ -369,7 +369,11 @@ const home = () => {
   });`
 
         return `const onGenerate = async (config) => {
+  try {
 ${configScript}
+  } catch (e) {
+    console.warn('[relay-proxy-helper] 代理链脚本执行出错，已回退为原始配置:', e);
+  }
   return config
 }`.replace(/^\s*$(?:\r\n?|\n)/gm, '')
       }
