@@ -1,5 +1,6 @@
 const PATH = 'data/third/traffic-statistics'
 const TAGS_FILE = PATH + '/tags.json'
+const HIDDEN_RANKS_FILE = PATH + '/hidden-ranks.json'
 const DataVersion = '-v1'
 
 window[Plugin.id] = window[Plugin.id] || {
@@ -7,6 +8,7 @@ window[Plugin.id] = window[Plugin.id] || {
     currentMonth: '',
     data: null,
     tagsConfig: {},
+    hiddenRanks: [],
     lastConnections: {},
     unregs: []
   }
@@ -162,9 +164,20 @@ const initTagsConfig = async () => {
   store.tagsConfig = JSON.parse(content || '{}')
 }
 
+const initHiddenRanks = async () => {
+  const content = await Plugins.ReadFile(HIDDEN_RANKS_FILE).catch(() => '{}')
+  const parsed = JSON.parse(content || '[]')
+  store.hiddenRanks = Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []
+}
+
 const saveTagsConfig = async () => {
   await Plugins.MakeDir(PATH).catch(() => {})
   await Plugins.WriteFile(TAGS_FILE, JSON.stringify(store.tagsConfig, null, 2))
+}
+
+const saveHiddenRanks = async () => {
+  await Plugins.MakeDir(PATH).catch(() => {})
+  await Plugins.WriteFile(HIDDEN_RANKS_FILE, JSON.stringify(store.hiddenRanks, null, 2))
 }
 
 const saveMonthlyData = async () => {
@@ -445,6 +458,7 @@ const onBeforeCoreStart = async (config, profile) => {
 const onReady = async () => {
   await initMonthlyData()
   await initTagsConfig()
+  await initHiddenRanks()
   await Stop().catch((err) => {
     console.log(`[${Plugin.name}] onReady: Stop()`, err)
   })
@@ -468,6 +482,7 @@ const onReload = async () => {
 const onRun = async () => {
   if (!store.data) await initMonthlyData()
   await initTagsConfig()
+  await initHiddenRanks()
   home().open()
   return 0
 }
@@ -518,7 +533,7 @@ const home = () => {
 
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <button
-          v-for="item in dimensions"
+          v-for="item in visibleDimensions"
           :key="item.value"
           @click="selectDimension(item)"
           :style="tabStyle(item.value)"
@@ -550,7 +565,7 @@ const home = () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in rows" :key="row.name" @click="selectRow(row)" style="border-top:1px solid #edf0f2; cursor:pointer;">
+              <tr v-for="row in rows" :key="row.name" style="border-top:1px solid #edf0f2;">
                 <td style="padding:10px 12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="row.name">{{ row.name }}</td>
                 <td style="padding:10px 8px; text-align:right; font-variant-numeric:tabular-nums;">{{ formatBytes(row.down) }}</td>
                 <td style="padding:10px 8px; text-align:right; font-variant-numeric:tabular-nums;">{{ formatBytes(row.up) }}</td>
@@ -565,25 +580,34 @@ const home = () => {
 
         <aside style="display:flex; flex-direction:column; gap:14px;">
           <section style="border:1px solid #e0e3e7; border-radius:8px; background:#fff; padding:12px;">
-            <div style="font-weight:700; margin-bottom:8px;">选中项</div>
-            <div v-if="selectedRow">
-              <div style="font-size:13px; word-break:break-all;">{{ selectedRow.name }}</div>
-              <div v-if="selectedRow.type || selectedRow.sourceIP" style="margin-top:6px; color:#6b7280; font-size:12px;">
-                {{ selectedRow.type === 'process' ? '按进程归类' : '按 IP 归类' }}
-                <span v-if="selectedRow.sourceIP"> · 来源 {{ selectedRow.sourceIP }}</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+              <div>
+                <div style="font-weight:700;">隐藏管理</div>
+                <div style="margin-top:4px; color:#6b7280; font-size:12px;">已隐藏 {{ hiddenRankingCount }} 个排行榜</div>
               </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;">
-                <div style="background:#f8fafb; border-radius:6px; padding:8px;">
-                  <div style="font-size:12px; color:#6b7280;">下行</div>
-                  <div style="font-weight:700; margin-top:4px;">{{ formatBytes(selectedRow.down) }}</div>
-                </div>
-                <div style="background:#f8fafb; border-radius:6px; padding:8px;">
-                  <div style="font-size:12px; color:#6b7280;">上行</div>
-                  <div style="font-weight:700; margin-top:4px;">{{ formatBytes(selectedRow.up) }}</div>
-                </div>
+              <Button v-if="hiddenRankingCount" @click="clearHiddenRanks" type="link" size="small">全部显示</Button>
+            </div>
+            <div style="margin-bottom:8px; color:#6b7280; font-size:12px; line-height:1.45;">
+              勾选后隐藏对应排行榜入口，不记录域名、节点等具体排行项。
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px; max-height:132px; overflow:auto;">
+              <div
+                v-for="item in dimensions"
+                :key="item.value"
+                style="display:flex; align-items:center; justify-content:space-between; gap:8px; border:1px solid #edf0f2; border-radius:6px; padding:6px 8px;"
+              >
+                <label style="display:flex; align-items:center; gap:8px; min-width:0; color:#3c4043; font-size:12px; cursor:pointer;">
+                  <input
+                    type="checkbox"
+                    :checked="isRankingHidden(item.value)"
+                    @change="toggleHiddenRank(item, $event.target.checked)"
+                    style="margin:0;"
+                  />
+                  <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ item.label }}排行</span>
+                </label>
+                <span style="color:#87909a; font-size:12px;">{{ isRankingHidden(item.value) ? '隐藏' : '显示' }}</span>
               </div>
             </div>
-            <div v-else style="color:#87909a; font-size:13px;">点击排行中的一行查看详情。</div>
           </section>
 
           <section style="border:1px solid #e0e3e7; border-radius:8px; background:#fff; padding:12px;">
@@ -591,10 +615,13 @@ const home = () => {
               <div style="font-weight:700;">标签配置</div>
               <Button @click="saveTags" type="link" size="small">保存</Button>
             </div>
+            <div style="margin-bottom:8px; color:#6b7280; font-size:12px; line-height:1.45;">
+              根域名或完整域名映射到标签数组，用于汇总“标签”排行。
+            </div>
             <textarea
               v-model="tagsText"
               spellcheck="false"
-              style="width:100%; min-height:190px; resize:vertical; border:1px solid #dadce0; border-radius:6px; padding:8px; font-family:Consolas, monospace; font-size:12px; line-height:1.5;"
+              style="width:100%; min-height:120px; resize:vertical; border:1px solid #dadce0; border-radius:6px; padding:8px; font-family:Consolas, monospace; font-size:12px; line-height:1.5;"
             ></textarea>
           </section>
         </aside>
@@ -606,10 +633,19 @@ const home = () => {
       const day = ref('all')
       const months = ref([store.currentMonth].filter(Boolean))
       const data = ref(store.data)
-      const dimension = ref('domains')
-      const sort = ref('down')
+
+      // 隐藏管理只保存排行榜维度，不保存具体域名、节点、进程等排行项。
+      const normalizeHiddenRanks = (list) => {
+        const validValues = new Set(dimensions.map((item) => item.value))
+        const uniqueValues = Array.from(new Set(Array.isArray(list) ? list : [])).filter((value) => validValues.has(value))
+        return uniqueValues.length >= dimensions.length ? uniqueValues.slice(0, dimensions.length - 1) : uniqueValues
+      }
+
+      const hiddenRanks = ref(normalizeHiddenRanks(store.hiddenRanks))
+      const defaultDimension = dimensions.find((item) => !hiddenRanks.value.includes(item.value)) || dimensions[0]
+      const dimension = ref(defaultDimension.value)
+      const sort = ref(defaultDimension.sort)
       const keyword = ref('')
-      const selectedRow = ref(null)
       const tagsText = ref(JSON.stringify(store.tagsConfig || {}, null, 2))
 
       const formatBytes = (bytes = 0) => {
@@ -640,7 +676,6 @@ const home = () => {
       }
 
       const loadMonth = async () => {
-        selectedRow.value = null
         day.value = 'all'
         if (!month.value || month.value === store.currentMonth) {
           data.value = store.data
@@ -679,6 +714,14 @@ const home = () => {
         ]
       })
 
+      const hiddenRankSet = computed(() => new Set(hiddenRanks.value))
+
+      const visibleDimensions = computed(() => dimensions.filter((item) => !hiddenRankSet.value.has(item.value)))
+
+      const hiddenRankingCount = computed(() => hiddenRanks.value.length)
+
+      const isRankingHidden = (value) => hiddenRankSet.value.has(value)
+
       const rows = computed(() => {
         const map = target.value?.details?.[dimension.value] || {}
         const list = Object.entries(map).map(([name, val]) => {
@@ -695,11 +738,6 @@ const home = () => {
       const selectDimension = (item) => {
         dimension.value = item.value
         sort.value = item.sort
-        selectedRow.value = null
-      }
-
-      const selectRow = (row) => {
-        selectedRow.value = row
       }
 
       const tabStyle = (value) => ({
@@ -724,6 +762,36 @@ const home = () => {
         }
       }
 
+      const updateHiddenRanks = async (next) => {
+        hiddenRanks.value = next
+        store.hiddenRanks = next
+        await saveHiddenRanks()
+      }
+
+      const toggleHiddenRank = async (item, checked) => {
+        const current = normalizeHiddenRanks(hiddenRanks.value)
+        if (checked && !current.includes(item.value) && current.length >= dimensions.length - 1) {
+          Plugins.message.error('至少保留一个排行榜')
+          return
+        }
+
+        const next = checked
+          ? Array.from(new Set([...current, item.value]))
+          : current.filter((value) => value !== item.value)
+        await updateHiddenRanks(next)
+
+        if (checked && dimension.value === item.value) {
+          const nextDimension = dimensions.find((dimensionItem) => !next.includes(dimensionItem.value))
+          if (nextDimension) selectDimension(nextDimension)
+        }
+      }
+
+      const clearHiddenRanks = async () => {
+        if (!hiddenRanks.value.length) return
+        await updateHiddenRanks([])
+        Plugins.message.info('所有排行榜已显示')
+      }
+
       const saveViewedMonthData = async () => {
         if (month.value === store.currentMonth) {
           store.data = data.value
@@ -746,7 +814,6 @@ const home = () => {
           data.value = rebuildMonthlyDataFromDaily(data.value)
         }
 
-        selectedRow.value = null
         await saveViewedMonthData()
         await refresh()
         Plugins.message.info(`已清除 ${scope} 的统计数据`)
@@ -761,21 +828,24 @@ const home = () => {
         days,
         dimensions,
         dimension,
+        visibleDimensions,
         sort,
         keyword,
-        selectedRow,
         tagsText,
         summaryCards,
         rows,
+        hiddenRankingCount,
+        isRankingHidden,
         currentDimensionLabel,
         formatBytes,
         displayCount,
         loadMonth,
         refresh,
         selectDimension,
-        selectRow,
         tabStyle,
         saveTags,
+        toggleHiddenRank,
+        clearHiddenRanks,
         clearData
       }
     }
@@ -972,7 +1042,7 @@ function registerStatsApi(router) {
       const files = await Plugins.ReadDir(PATH)
       res.json(
         200,
-        files.filter((f) => f.name.endsWith('.json') && f.name !== 'tags.json').map((f) => f.name.replace('.json', ''))
+        files.filter((f) => f.name.endsWith(`${DataVersion}.json`)).map((f) => f.name.replace(/\.json$/, '').replace(DataVersion, ''))
       )
     } catch (e) {
       res.json(200, [])
