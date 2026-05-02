@@ -8,5 +8,5 @@ https://raw.githubusercontent.com/llxo/proxycr/refs/heads/main/plugins/GFS/plugi
 ```
 Sub Store流量统计插件
 ```
-https://raw.githubusercontent.com/llxo/proxycr/refs/heads/main/plugins/GFS/plugin-traffic-monitor.js
+https://raw.githubusercontent.com/llxo/proxycr/refs/heads/main/plugins/GFS/plugin-traffic-statistics.js
 ```
