@@ -2,6 +2,7 @@ const PATH = 'data/third/traffic-statistics'
 const TAGS_FILE = PATH + '/tags.json'
 const HIDDEN_RANKS_FILE = PATH + '/hidden-ranks.json'
 const DataVersion = '-v1'
+const SAVE_DEBOUNCE_MS = 10000
 
 window[Plugin.id] = window[Plugin.id] || {
   state: {
@@ -10,6 +11,7 @@ window[Plugin.id] = window[Plugin.id] || {
     tagsConfig: {},
     hiddenRanks: [],
     lastConnections: {},
+    saveTimer: null,
     unregs: []
   }
 }
@@ -187,6 +189,25 @@ const saveMonthlyData = async () => {
   await Plugins.WriteFile(path, JSON.stringify(store.data))
 }
 
+const scheduleSaveMonthlyData = () => {
+  if (store.saveTimer) return
+  // 统计事件频率较高，延迟合并写盘，避免每条连接或日志都触发文件写入。
+  store.saveTimer = setTimeout(async () => {
+    store.saveTimer = null
+    await saveMonthlyData().catch((err) => {
+      console.log(`[${Plugin.name}] saveMonthlyData`, err)
+    })
+  }, SAVE_DEBOUNCE_MS)
+}
+
+const flushMonthlyData = async () => {
+  if (store.saveTimer) {
+    clearTimeout(store.saveTimer)
+    store.saveTimer = null
+  }
+  await saveMonthlyData()
+}
+
 const updateStats = (target, diffUp, diffDown, isNew, info) => {
   if (!target) return
   const { node, fqdn, root, process, rule, tags, clientIP, clientType, sourceIP } = info
@@ -280,12 +301,13 @@ const handleConnections = async (data) => {
 
   // 跨月检查
   if (month !== store.currentMonth) {
-    await saveMonthlyData()
+    await flushMonthlyData()
     await initMonthlyData()
   }
 
   const day = now.getDate().toString()
   const currentIDs = new Set()
+  let changed = false
 
   if (!store.data.daily[day]) store.data.daily[day] = createEmptyStats()
   const dayData = store.data.daily[day]
@@ -317,12 +339,14 @@ const handleConnections = async (data) => {
       const isNew = !previousRecord
       updateStats(store.data, diffUp, diffDown, isNew, info)
       updateStats(dayData, diffUp, diffDown, isNew, info)
+      changed = true
     }
     store.lastConnections[id] = { download, upload }
   }
   for (const id in store.lastConnections) {
     if (!currentIDs.has(id)) delete store.lastConnections[id]
   }
+  if (changed) scheduleSaveMonthlyData()
 }
 
 const handleLogs = async (data) => {
@@ -408,6 +432,8 @@ const handleLogs = async (data) => {
     updateDnsStats(store.data)
     updateDnsStats(dayData)
   }
+
+  scheduleSaveMonthlyData()
 }
 
 const Start = async (params = Plugin) => {
@@ -428,7 +454,7 @@ const Start = async (params = Plugin) => {
 
 const Stop = async () => {
   console.log(`[${Plugin.name}] Stop()`)
-  await saveMonthlyData()
+  await flushMonthlyData()
   await Plugins.StopServer(Plugin.id)
   unRegisterHandler()
   return 2
@@ -476,7 +502,7 @@ const onShutdown = async () => {
 }
 
 const onReload = async () => {
-  await saveMonthlyData()
+  await flushMonthlyData()
 }
 
 const onRun = async () => {
